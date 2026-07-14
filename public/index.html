@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>⚡ QUIZ PLAYER ⚡</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        :root {
+            --bg-gradient: linear-gradient(135deg, #0f0c1b 0%, #201335 100%);
+            --neon-cyan: #00f3ff;
+            --neon-magenta: #ff007f;
+            --text: #fff;
+        }
+        body { background: var(--bg-gradient); color: var(--text); font-family: sans-serif; padding: 20px; text-align: center; margin: 0; min-height: 100vh; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        .container { background: rgba(255,255,255,0.03); padding: 30px; border-radius: 20px; border: 1px solid rgba(255,255,255,0.08); width: 100%; max-width: 500px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); box-sizing: border-box; }
+        .input-field { width: 100%; padding: 15px; font-size: 1.1rem; border-radius: 10px; border: 1px solid rgba(255,255,255,0.2); background: rgba(0,0,0,0.2); color: #fff; margin-bottom: 20px; box-sizing: border-box; text-align: center; }
+        .btn { width: 100%; background: linear-gradient(45deg, var(--neon-cyan), var(--neon-magenta)); color: #000; border: none; padding: 16px; font-weight: bold; border-radius: 10px; cursor: pointer; font-size: 1.2rem; margin: 10px 0; transition: all 0.2s; box-sizing: border-box; }
+        .btn:hover { transform: translateY(-2px); box-shadow: 0 5px 15px rgba(0,243,255,0.3); }
+        .btn:disabled { background: #444 !important; color: #888 !important; cursor: not-allowed; transform: none !important; box-shadow: none !important; }
+        
+        /* 퀴즈 보기 레이아웃 */
+        .options-container { display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
+        .opt-btn { background: rgba(255,255,255,0.07); color: #fff; border: 1px solid rgba(255,255,255,0.15); padding: 18px; font-size: 1.2rem; border-radius: 12px; cursor: pointer; transition: all 0.2s; font-weight: bold; text-align: left; padding-left: 25px; }
+        .opt-btn:hover { background: rgba(0, 243, 255, 0.15); border-color: var(--neon-cyan); }
+        
+        .timer-bar { font-size: 2.5rem; font-weight: bold; color: var(--neon-magenta); margin: 15px 0; }
+        .status-msg { font-size: 1.3rem; font-weight: bold; margin: 20px 0; padding: 15px; border-radius: 10px; }
+        .status-correct { background: rgba(0, 255, 128, 0.15); color: #00ff80; border: 1px solid #00ff80; }
+        .status-wrong { background: rgba(255, 0, 85, 0.15); color: #ff0055; border: 1px solid #ff0055; }
+        .hidden { display: none; }
+        body {
+    position: relative;
+    overflow: hidden;
+    transition: background 0.8s ease; /* 빨간 배경 부드럽게 전환 */
+}
+/* --- 시계태엽 이펙트 CSS (style 태그 닫히기 직전에 추가) --- */
+
+/* 10초 이하일 때 위험을 알리는 붉은 배경 전환 */
+body.hurry-up {
+    background: linear-gradient(135deg, #2b080c 0%, #120204 100%) !important;
+}
+
+/* ⚙️ 시계태엽 배경 레이어 */
+.gear-container {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none; /* 클릭을 방해하지 않음 */
+    z-index: 0;
+    opacity: 0; /* 평소엔 숨김 */
+    transition: opacity 1s ease;
+}
+
+/* 10초 이하일 때 은은하게 노출 */
+body.hurry-up .gear-container {
+    opacity: 0.15;
+}
+
+.gear {
+    position: absolute;
+    fill: #ff0055;
+    transform-origin: center;
+}
+
+/* 큰 태엽 (우측 하단) */
+.gear-large {
+    bottom: -100px;
+    right: -100px;
+    width: 400px;
+    height: 400px;
+    animation: rotate-cw 20s linear infinite;
+}
+
+/* 작은 태엽 (좌측 상단, 역회전) */
+.gear-small {
+    top: -50px;
+    left: -50px;
+    width: 250px;
+    height: 250px;
+    animation: rotate-ccw 12s linear infinite;
+}
+
+/* 시계방향 회전 애니메이션 */
+@keyframes rotate-cw {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* 반시계방향 회전 애니메이션 */
+@keyframes rotate-ccw {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(-360deg); }
+}
+
+/* 타이머 글자 쿵쾅거리는 애니메이션 */
+.timer-bar.warning {
+    color: #ff0055 !important;
+    animation: pulse-beat 1s infinite alternate;
+    text-shadow: 0 0 15px #ff0055;
+}
+
+@keyframes pulse-beat {
+    from { transform: scale(1); }
+    to { transform: scale(1.15); }
+}
+    </style>
+</head>
+<body>
+<!-- ⚙️ 흘러가는 시계태엽 배경 레이어 (<body> 태그 바로 아래에 추가) -->
+<div class="gear-container">
+    <!-- 큰 태엽 SVG -->
+    <svg class="gear gear-large" viewBox="0 0 100 100">
+        <path d="M50,35 C41.7,35 35,41.7 35,50 C35,58.3 41.7,65 50,65 C58.3,65 65,58.3 65,50 C65,41.7 58.3,35 50,35 Z M50,58 C45.6,58 42,54.4 42,50 C42,45.6 45.6,42 50,42 C54.4,42 58,45.6 58,50 C58,54.4 54.4,58 50,58 Z" />
+        <path d="M48,5 L52,5 L53,15 L47,15 Z M48,85 L52,85 L53,95 L47,95 Z M5,48 L5,52 L15,53 L15,47 Z M85,48 L85,52 L95,53 L95,47 Z M19,19 L22,22 L29,15 L26,12 Z M78,78 L81,81 L88,74 L85,71 Z M19,81 L22,78 L15,71 L12,74 Z M81,19 L78,22 L71,15 L74,12 Z" />
+    </svg>
+    <!-- 작은 태엽 SVG -->
+    <svg class="gear gear-small" viewBox="0 0 100 100">
+        <path d="M50,35 C41.7,35 35,41.7 35,50 C35,58.3 41.7,65 50,65 C58.3,65 65,58.3 65,50 C65,41.7 58.3,35 50,35 Z M50,58 C45.6,58 42,54.4 42,50 C42,45.6 45.6,42 50,42 C54.4,42 58,45.6 58,50 C58,54.4 54.4,58 50,58 Z" />
+        <path d="M48,5 L52,5 L53,15 L47,15 Z M48,85 L52,85 L53,95 L47,95 Z M5,48 L5,52 L15,53 L15,47 Z M85,48 L85,52 L95,53 L95,47 Z M19,19 L22,22 L29,15 L26,12 Z M78,78 L81,81 L88,74 L85,71 Z M19,81 L22,78 L15,71 L12,74 Z M81,19 L78,22 L71,15 L74,12 Z" />
+    </svg>
+</div>
+<div class="container">
+    <!-- 1단계: 닉네임 입력방 -->
+    <div id="join-screen">
+        <h1 style="color: var(--neon-cyan); margin-bottom: 30px;">⚡ QUIZ GAME ⚡</h1>
+        <input type="text" id="nickname-input" class="input-field" placeholder="닉네임을 입력하세요" maxlength="10">
+        <button class="btn" onclick="joinGame()">입장하기 🚀</button>
+    </div>
+
+    <!-- 2단계: 대기 화면 -->
+    <div id="wait-screen" class="hidden">
+        <h2 style="color: #aaa;">대기실 입장 완료!</h2>
+        <h1 id="my-name" style="color: var(--neon-cyan); margin: 20px 0;">-</h1>
+        <p>방장(호스트)이 게임을 시작할 때까지 잠시만 기다려주세요...</p>
+    </div>
+
+    <!-- 3단계: 퀴즈 풀이 화면 -->
+    <div id="quiz-screen" class="hidden">
+        <div id="player-timer" class="timer-bar">20</div>
+        <h3 id="question-text" style="font-size: 1.4rem; margin-bottom: 25px; line-height: 1.4;">Q. 문제가 출제되는 중입니다...</h3>
+        
+        <!-- 동적으로 보기 버튼들이 생성되는 공간 -->
+        <div class="options-container" id="options-box"></div>
+        
+        <p id="lock-msg" style="color: #aaa; margin-top: 15px;" class="hidden">🔒 답안이 제출되었습니다. 결과를 기다리는 중...</p>
+    </div>
+
+    <!-- 4단계: 라운드 결과 (정답/오답 확인) -->
+    <div id="result-screen" class="hidden">
+        <div id="result-banner" class="status-msg">정답입니다! 🎉</div>
+        <p style="font-size: 1.1rem; color: #aaa;">진짜 정답: <span id="real-answer" style="color:#fff; font-weight:bold;">-</span></p>
+        <h2 style="margin-top: 30px;">내 현재 점수</h2>
+        <h1 id="player-score" style="font-size: 3rem; color: gold; margin: 10px 0;">0점</h1>
+        <p style="color: #888;">다음 문제가 곧 시작됩니다...</p>
+    </div>
+
+    <!-- 5단계: 게임 최종 종료 -->
+    <div id="gameover-screen" class="hidden">
+        <h1 style="color: gold; font-size: 2.5rem; margin-bottom: 20px;">🎉 GAME OVER 🎉</h1>
+        <p style="font-size: 1.2rem;">모든 퀴즈가 종료되었습니다!</p>
+        <p style="color: #aaa; margin: 20px 0;">최종 순위와 점수는 방장 화면을 확인해 주세요.</p>
+        <button class="btn" onclick="location.reload()">다시 참여하기 🔄</button>
+    </div>
+</div>
+
+<script>
+    const socket = io();
+    let myNickname = "";
+
+    function joinGame() {
+        const input = document.getElementById('nickname-input');
+        myNickname = input.value.trim();
+        if(!myNickname) return alert('닉네임을 입력해 주세요!');
+
+        socket.emit('joinGame', myNickname);
+
+        document.getElementById('join-screen').classList.add('hidden');
+        document.getElementById('wait-screen').classList.remove('hidden');
+        document.getElementById('my-name').innerText = myNickname;
+    }
+
+    // 서버 실시간 타이머 동기화
+   // 기존 socket.on('timerUpdate') 부분만 이 내용으로 덮어씌우거나 교체합니다.
+socket.on('timerUpdate', (time) => {
+    const t = document.getElementById('player-timer');
+    if(t) {
+        t.innerText = time;
+        
+        // 시간이 10초 이하일 때 'hurry-up' 클래스를 바디에 추가해 이펙트를 켭니다.
+        if(time <= 10 && time > 0) {
+            document.body.classList.add('hurry-up');
+            t.classList.add('warning');
+        } else {
+            document.body.classList.remove('hurry-up');
+            t.classList.remove('warning');
+        }
+    }
+});
+
+    // 💥 중요: 새 문제 출제 이벤트 (기존 이벤트 버그 완벽 예방)
+    socket.on('newQuestion', (q) => {
+        // 화면 전환 처리
+        document.getElementById('wait-screen').classList.add('hidden');
+        document.getElementById('result-screen').classList.add('hidden');
+        document.getElementById('gameover-screen').classList.add('hidden');
+        document.getElementById('quiz-screen').classList.remove('hidden');
+        document.getElementById('lock-msg').classList.add('hidden');
+
+        // 문제 텍스트 적용
+        document.getElementById('question-text').innerText = `${q.index + 1}. ${q.question}`;
+
+        const box = document.getElementById('options-box');
+        box.innerHTML = ''; // 기존 버튼들 완전히 제거 (메모리 청소)
+
+        // 1. 객관식 (CHOICE) 처리
+        if (q.type === 'CHOICE' && q.options) {
+            q.options.forEach((opt, idx) => {
+                const btn = document.createElement('button');
+                btn.className = 'opt-btn';
+                btn.innerText = `${idx + 1}. ${opt}`;
+                
+                // 중복 이벤트 리스너를 방지하기 위해 인라인 혹은 다이렉트 핸들러 할당
+                btn.onclick = () => sendAnswer(idx); 
+                box.appendChild(btn);
+            });
+        } 
+        // 2. OX 문제 처리
+        else if (q.type === 'OX') {
+            const btnO = document.createElement('button');
+            btnO.className = 'opt-btn';
+            btnO.innerText = '⭕ O';
+            btnO.onclick = () => sendAnswer('O');
+
+            const btnX = document.createElement('button');
+            btnX.className = 'opt-btn';
+            btnX.innerText = '❌ X';
+            btnX.onclick = () => sendAnswer('X');
+
+            box.appendChild(btnO);
+            box.appendChild(btnX);
+        } 
+        // 3. 주관식 (SHORT) 처리
+        else if (q.type === 'SHORT') {
+            const input = document.createElement('input');
+            input.type = 'text';
+            input.className = 'input-field';
+            input.id = 'short-ans-input';
+            input.placeholder = '정답을 직접 입력하세요';
+
+            const subBtn = document.createElement('button');
+            subBtn.className = 'btn';
+            subBtn.innerText = '답안 제출하기 📝';
+            subBtn.onclick = () => {
+                const val = document.getElementById('short-ans-input').value.trim();
+                if(!val) return alert('답안을 입력하세요!');
+                sendAnswer(val);
+            };
+
+            box.appendChild(input);
+            box.appendChild(subBtn);
+        }
+    });
+
+    // 정답 제출 공통 함수
+    function sendAnswer(answerValue) {
+        // 서버로 내가 고른 값 송신 (인덱스 숫자 또는 문자열)
+        socket.emit('submitAnswer', answerValue);
+
+        // 정답 오버레이 막기 (더 이상 터치 불가하도록 버튼 비활성화)
+        const buttons = document.querySelectorAll('#options-box button, #options-box input');
+        buttons.forEach(el => el.disabled = true);
+        document.getElementById('lock-msg').classList.remove('hidden');
+    }
+
+    // 한 라운드 결과 수신
+    socket.on('roundResult', (data) => {
+        document.body.classList.remove('hurry-up');
+        document.getElementById('quiz-screen').classList.add('hidden');
+        document.getElementById('result-screen').classList.remove('hidden');
+
+        const banner = document.getElementById('result-banner');
+        if(data.isCorrect) {
+            banner.innerText = "정답입니다! 🎉";
+            banner.className = "status-msg status-correct";
+        } else {
+            banner.innerText = "아쉽게도 틀렸습니다! 😢";
+            banner.className = "status-msg status-wrong";
+        }
+
+        document.getElementById('real-answer').innerText = data.correctAnswer;
+        document.getElementById('player-score').innerText = `${data.score}점`;
+    });
+
+    // 전체 게임 오버
+    socket.on('gameOver', () => {
+        document.body.classList.remove('hurry-up');
+        document.getElementById('quiz-screen').classList.add('hidden');
+        document.getElementById('result-screen').classList.add('hidden');
+        document.getElementById('gameover-screen').classList.remove('hidden');
+    });
+</script>
+</body>
+</html>
